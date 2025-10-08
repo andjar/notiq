@@ -8,6 +8,7 @@ use ratatui::{
 };
 use notiq_core::storage::{TagRepository, LinkRepository, NoteRepository, NodeRepository};
 use chrono::{Datelike, NaiveDate, Weekday};
+use regex::Regex;
 
 /// Render the header with title and key hints
 pub fn render_header(frame: &mut Frame, app: &App, area: Rect) {
@@ -48,7 +49,7 @@ pub fn render_header(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 /// Render the outline view
-pub fn render_outline(frame: &mut Frame, app: &App, area: Rect) {
+pub fn render_outline(frame: &mut Frame, app: &mut App, area: Rect) {
     let visible_nodes = app.get_visible_nodes();
 
     if visible_nodes.is_empty() {
@@ -71,7 +72,12 @@ pub fn render_outline(frame: &mut Frame, app: &App, area: Rect) {
             // Show edit buffer instead of node content
             render_node_line_editing(tree_node, &app.edit_buffer)
         } else {
-            render_node_line(tree_node)
+            render_and_track_node_line(tree_node, app, Rect {
+                x: area.x + 1,
+                y: area.y + 1 + (i - app.scroll_offset) as u16,
+                width: area.width.saturating_sub(2),
+                height: 1,
+            })
         };
         
         // Highlight selected line
@@ -121,39 +127,37 @@ pub fn render_outline(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(outline, area);
 
     if app.is_editing {
-        if let Some(node_id) = app.get_selected_node_id() {
+        if let Some(_node_id) = app.get_selected_node_id() {
+            let visible_node = &app.get_visible_nodes()[app.cursor_position];
+            let bullet_width = if visible_node.node.is_task { 2 } else if !visible_node.children.is_empty() { 2 } else { 2 };
+            let indent_width = visible_node.depth as u16 * 2;
             let edit_area = Rect {
-                x: area.x + app.get_visible_nodes()[app.cursor_position].depth as u16 * 2 + 3,
-                y: area.y + app.cursor_position as u16 - app.scroll_offset as u16,
-                width: area.width.saturating_sub(app.get_visible_nodes()[app.cursor_position].depth as u16 * 2 + 3),
+                x: area.x + 1 + indent_width + bullet_width,
+                y: area.y + 1 + app.cursor_position as u16 - app.scroll_offset as u16,
+                width: area.width.saturating_sub(2 + indent_width + bullet_width),
                 height: 1,
             };
+
+            let cursor_x = edit_area.x + app.edit_buffer[..app.edit_buffer.char_indices().map(|(i, _)| i).nth(app.edit_cursor_position).unwrap_or(app.edit_buffer.len())].width() as u16;
+
             frame.set_cursor(
-                edit_area.x + app.edit_cursor_position as u16,
+                cursor_x,
                 edit_area.y,
             );
         }
     }
 }
 
-/// Render a single node line with proper indentation
-fn render_node_line(tree_node: &TreeNode) -> Line<'_> {
+/// Render a single node line and track link locations
+fn render_and_track_node_line<'a>(tree_node: &'a TreeNode, app: &mut App, line_area: Rect) -> Line<'a> {
     let indent = "  ".repeat(tree_node.depth);
     let node = &tree_node.node;
 
     // Determine bullet point
     let bullet = if node.is_task {
-        if node.task_completed {
-            "☑ "
-        } else {
-            "☐ "
-        }
+        if node.task_completed { "☑ " } else { "☐ " }
     } else if !tree_node.children.is_empty() {
-        if tree_node.is_expanded {
-            "▼ "
-        } else {
-            "▶ "
-        }
+        if tree_node.is_expanded { "▼ " } else { "▶ " }
     } else {
         "• "
     };
@@ -161,24 +165,16 @@ fn render_node_line(tree_node: &TreeNode) -> Line<'_> {
     // Style based on node type
     let content_style = if node.is_task {
         if node.task_completed {
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::CROSSED_OUT)
+            Style::default().fg(Color::DarkGray).add_modifier(Modifier::CROSSED_OUT)
         } else {
             Style::default().fg(Color::White)
         }
     } else if !tree_node.children.is_empty() {
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
     } else {
-        match &node.block_type {
-            notiq_core::models::BlockType::Quote => Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::ITALIC),
-            notiq_core::models::BlockType::Code => Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
+         match &node.block_type {
+            notiq_core::models::BlockType::Quote => Style::default().fg(Color::Cyan).add_modifier(Modifier::ITALIC),
+            notiq_core::models::BlockType::Code => Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
             notiq_core::models::BlockType::Normal => Style::default().fg(Color::White),
         }
     };
@@ -197,15 +193,45 @@ fn render_node_line(tree_node: &TreeNode) -> Line<'_> {
         ""
     };
 
-    let spans = vec![
-        Span::raw(indent),
+    let mut spans = vec![
+        Span::raw(indent.clone()),
         Span::styled(bullet, Style::default().fg(Color::Cyan)),
-        Span::styled(node.content.clone(), content_style),
-        Span::raw(priority_indicator),
     ];
+    
+    let mut current_x = line_area.x + indent.len() as u16 + bullet.len() as u16;
 
+    let re = Regex::new(r"\[\[([^\]]+)\]\]").unwrap();
+    let mut last_index = 0;
+
+    for cap in re.captures_iter(&node.content) {
+        let full_match = cap.get(0).unwrap();
+        let link_text = cap.get(1).unwrap();
+
+        // Text before link
+        let before_text = &node.content[last_index..full_match.start()];
+        spans.push(Span::styled(before_text.to_string(), content_style));
+        current_x += before_text.len() as u16;
+
+        // The link
+        let link_rect = Rect::new(current_x, line_area.y, full_match.as_str().len() as u16, 1);
+        app.link_locations.push((link_rect, link_text.as_str().to_string()));
+
+        spans.push(Span::styled(
+            full_match.as_str().to_string(),
+            Style::default().fg(Color::Magenta).add_modifier(Modifier::UNDERLINED),
+        ));
+        current_x += full_match.as_str().len() as u16;
+        last_index = full_match.end();
+    }
+
+    // Remaining text
+    let after_text = &node.content[last_index..];
+    spans.push(Span::styled(after_text.to_string(), content_style));
+    spans.push(Span::raw(priority_indicator));
+    
     Line::from(spans)
 }
+
 
 /// Render a node line when it's being edited (show edit buffer)
 fn render_node_line_editing<'a>(tree_node: &TreeNode, edit_buffer: &'a str) -> Line<'a> {

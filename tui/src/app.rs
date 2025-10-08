@@ -11,6 +11,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 use std::time::Instant;
+use ratatui::layout::Rect;
 
 /// Represents a node in the outline tree with its children
 #[derive(Debug, Clone)]
@@ -139,6 +140,8 @@ pub struct App {
     pub page_title_buffer: String,
     // Help screen
     pub help_open: bool,
+    // Clickable links tracking
+    pub link_locations: Vec<(Rect, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -216,6 +219,8 @@ impl App {
             page_title_buffer: String::new(),
             // Help screen
             help_open: false,
+            // Clickable links
+            link_locations: Vec::new(),
         })
     }
 

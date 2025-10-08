@@ -7,7 +7,8 @@ use ratatui::{
 use super::{render_header, render_outline, render_status_bar, render_page_switcher, render_search_overlay, render_sidebar_tags_and_pages, render_backlinks_panel, render_attachments_panel, render_attach_overlay, render_logbook, render_delete_confirmation, render_autocomplete, render_task_overview, render_rename_page_overlay, render_help_screen};
 
 /// Render the complete UI
-pub fn render(frame: &mut Frame, app: &App) {
+pub fn render(frame: &mut Frame, app: &mut App) {
+    app.link_locations.clear();
     let size = frame.size();
 
     // Create main layout: header, content, status bar
@@ -57,7 +58,7 @@ pub fn render(frame: &mut Frame, app: &App) {
 }
 
 /// Render the main content area (will have sidebar + outliner in future)
-fn render_content(frame: &mut Frame, app: &App, area: Rect) {
+fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
     // Phase 4: Split content into sidebar and outline
     // Dynamic layout: optional sidebar; split backlinks/attachments vertically
     if app.show_sidebar {

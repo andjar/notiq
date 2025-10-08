@@ -1,6 +1,7 @@
 use anyhow::Result;
 use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind, Event as CEvent, KeyEventKind};
 use std::time::Duration;
+use notiq_core::storage::NoteRepository;
 
 /// Terminal events
 #[derive(Debug, Clone, Copy)]
@@ -175,13 +176,10 @@ pub fn handle_key_event(key: KeyEvent, app: &mut crate::app::App) {
         }
         // Search toggle
         KeyCode::Char('/') => app.open_search(),
-        KeyCode::Char('q') | KeyCode::Char('Q') => app.quit(),
+        KeyCode::Char('q') | KeyCode::Char('Q') if !key.modifiers.contains(KeyModifiers::CONTROL) => app.quit(),
         // Toggle sidebar
         KeyCode::Char('b') | KeyCode::Char('B') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.toggle_sidebar();
-        }
-        KeyCode::Char('c') | KeyCode::Char('C') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.quit();
         }
         // Page management shortcuts (Phase 4)
         KeyCode::Char('p') | KeyCode::Char('P') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -378,13 +376,26 @@ fn handle_autocomplete_input(key: KeyEvent, app: &mut crate::app::App) {
 }
 
 /// Handle mouse events: basic clicks on sidebar pages, outline selection, and calendar
-pub fn handle_mouse_event(mouse: MouseEvent, app: &mut crate::app::App, size: ratatui::prelude::Rect) {
+pub fn handle_mouse_event(mouse: MouseEvent, app: &mut crate::app::App, _size: ratatui::prelude::Rect) {
     match mouse.kind {
         MouseEventKind::Down(_) => {
+            // Check for link clicks first. Need to clone to avoid borrow checker issues.
+            let locations = app.link_locations.clone();
+            for (rect, target_title) in &locations {
+                if rect.contains(ratatui::layout::Position::new(mouse.column, mouse.row)) {
+                    if let Ok(target_note) = NoteRepository::get_by_title_exact(&app.db_connection, target_title) {
+                        if app.load_note(&target_note.id).is_ok() {
+                            return; // Click handled
+                        }
+                    }
+                }
+            }
+
             // Very simple hit-testing based on layout from layout.rs
             // Header: 3 rows, Status: 1 row -> content between
             let y = mouse.row;
             let x = mouse.column;
+            let size = _size;
             if y >= 3 && y < size.height.saturating_sub(1) {
                 // Content area
                 let content_top = 3u16;
