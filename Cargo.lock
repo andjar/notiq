@@ -702,7 +702,9 @@ dependencies = [
  "ratatui",
  "regex",
  "sha2",
+ "tempfile",
  "toml",
+ "unicode-width 0.1.14",
 ]
 
 [[package]]

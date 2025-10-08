@@ -18,8 +18,12 @@ hex = "0.4"
 mime_guess = "2.0"
 toml = "0.8"
 arboard = { version = "3.3", optional = true }
+unicode-width = "0.1"
 
 [features]
 default = ["clipboard"]
 clipboard = ["arboard"]
+
+[dev-dependencies]
+tempfile = "3.8"
 
