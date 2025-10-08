@@ -1,0 +1,31 @@
+[workspace]
+members = ["core", "tui", "cli"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["notiq-dev"]
+license = "MIT"
+
+[workspace.dependencies]
+# Core dependencies
+rusqlite = { version = "0.31", features = ["bundled", "chrono"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }
+anyhow = "1.0"
+thiserror = "1.0"
+
+# TUI dependencies
+ratatui = "0.26"
+crossterm = "0.27"
+
+# Markdown parsing
+pulldown-cmark = "0.9"
+
+# File system utilities
+walkdir = "2.4"
+sha2 = "0.10"
+

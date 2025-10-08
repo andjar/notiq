@@ -1,0 +1,18 @@
+[package]
+name = "notiq-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "notiq"
+path = "src/main.rs"
+
+[dependencies]
+notiq-core = { path = "../core" }
+notiq-tui = { path = "../tui" }
+anyhow = { workspace = true }
+crossterm = { workspace = true }
+ratatui = { workspace = true }
+
