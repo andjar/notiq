@@ -9,6 +9,7 @@ use ratatui::{
 use notiq_core::storage::{TagRepository, LinkRepository, NoteRepository, NodeRepository};
 use chrono::{Datelike, NaiveDate, Weekday};
 use regex::Regex;
+use unicode_width::UnicodeWidthStr;
 
 /// Render the header with title and key hints
 pub fn render_header(frame: &mut Frame, app: &App, area: Rect) {
@@ -63,25 +64,32 @@ pub fn render_outline(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Build lines for each visible node
     let mut lines: Vec<Line> = Vec::new();
+    let mut link_locations_to_add: Vec<(Rect, String)> = Vec::new();
 
-    for (i, tree_node) in visible_nodes.iter().enumerate().skip(app.scroll_offset) {
+    let is_editing = app.is_editing;
+    let cursor_position = app.cursor_position;
+    let edit_buffer = app.edit_buffer.clone();
+    let scroll_offset = app.scroll_offset;
+
+    for (i, tree_node) in visible_nodes.iter().enumerate().skip(scroll_offset) {
         // Check if this is the node being edited
-        let is_editing_this = app.is_editing && i == app.cursor_position;
+        let is_editing_this = is_editing && i == cursor_position;
         
         let mut line = if is_editing_this {
             // Show edit buffer instead of node content
-            render_node_line_editing(tree_node, &app.edit_buffer)
+            render_node_line_editing(tree_node, &edit_buffer)
         } else {
-            render_and_track_node_line(tree_node, app, Rect {
+            let line_area = Rect {
                 x: area.x + 1,
-                y: area.y + 1 + (i - app.scroll_offset) as u16,
+                y: area.y + 1 + (i - scroll_offset) as u16,
                 width: area.width.saturating_sub(2),
                 height: 1,
-            })
+            };
+            render_and_collect_links(tree_node, line_area, &mut link_locations_to_add)
         };
         
         // Highlight selected line
-        if i == app.cursor_position {
+        if i == cursor_position {
             line = line.style(Style::default().bg(Color::Blue).fg(Color::White));
         }
         lines.push(line);
@@ -114,6 +122,12 @@ pub fn render_outline(frame: &mut Frame, app: &mut App, area: Rect) {
             break;
         }
     }
+
+    // Drop the borrow on app by dropping visible_nodes
+    drop(visible_nodes);
+
+    // Add all collected link locations to app
+    app.link_locations.extend(link_locations_to_add);
 
     let outline = Paragraph::new(lines)
         .block(
@@ -148,8 +162,8 @@ pub fn render_outline(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-/// Render a single node line and track link locations
-fn render_and_track_node_line<'a>(tree_node: &'a TreeNode, app: &mut App, line_area: Rect) -> Line<'a> {
+/// Render a single node line and collect link locations
+fn render_and_collect_links(tree_node: &TreeNode, line_area: Rect, link_locations: &mut Vec<(Rect, String)>) -> Line<'static> {
     let indent = "  ".repeat(tree_node.depth);
     let node = &tree_node.node;
 
@@ -214,7 +228,7 @@ fn render_and_track_node_line<'a>(tree_node: &'a TreeNode, app: &mut App, line_a
 
         // The link
         let link_rect = Rect::new(current_x, line_area.y, full_match.as_str().len() as u16, 1);
-        app.link_locations.push((link_rect, link_text.as_str().to_string()));
+        link_locations.push((link_rect, link_text.as_str().to_string()));
 
         spans.push(Span::styled(
             full_match.as_str().to_string(),
