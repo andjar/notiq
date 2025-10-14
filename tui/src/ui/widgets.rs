@@ -583,10 +583,7 @@ pub fn render_calendar(frame: &mut Frame, app: &App, area: Rect) {
     // Determine grid start (Monday as first column)
     // Calculate which weekday the 1st of the month falls on
     let first_day_of_month = NaiveDate::from_ymd_opt(month_start.year(), month_start.month(), 1).unwrap();
-    let first_weekday = match first_day_of_month.weekday() { 
-        Weekday::Mon => 0, Weekday::Tue => 1, Weekday::Wed => 2, Weekday::Thu => 3, 
-        Weekday::Fri => 4, Weekday::Sat => 5, Weekday::Sun => 6 
-    };
+    let first_weekday = first_day_of_month.weekday().num_days_from_monday() as i32;
     let mut day = 1i32;
     let days_in_month = days_in_month(month_start.year(), month_start.month());
     let today = chrono::Utc::now().date_naive();
@@ -629,6 +626,24 @@ pub fn render_calendar(frame: &mut Frame, app: &App, area: Rect) {
         .block(Block::default().borders(Borders::ALL).title(" Calendar "))
         .wrap(Wrap { trim: true });
     frame.render_widget(widget, area);
+}
+
+pub fn render_search_results(frame: &mut Frame, app: &App, area: Rect) {
+    let mut items = Vec::new();
+    for (i, node) in app.search_results.iter().enumerate() {
+        let note_title = app.get_note_title_from_id(&node.note_id).unwrap_or_default();
+        let content = format!("[{}] {}", note_title, node.content);
+        let mut style = Style::default();
+        if i == app.search_selection {
+            style = style.bg(Color::Blue).fg(Color::Black);
+        }
+        items.push(ListItem::new(content).style(style));
+    }
+
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title(" Search Results "));
+    
+    frame.render_widget(list, area);
 }
 
 fn days_in_month(year: i32, month: u32) -> u32 {

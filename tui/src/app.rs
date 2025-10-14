@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 use std::time::Instant;
 use ratatui::layout::Rect;
+use crate::config::{Config, load_config};
+use std::collections::HashMap;
 
 /// Represents a node in the outline tree with its children
 #[derive(Debug, Clone)]
@@ -93,6 +95,7 @@ pub struct App {
     pub cursor_position: usize,
     pub scroll_offset: usize,
     pub db_connection: Connection,
+    pub config: Config,
     pub is_editing: bool,
     pub edit_buffer: String,
     pub edit_cursor_position: usize,
@@ -142,6 +145,13 @@ pub struct App {
     pub help_open: bool,
     // Clickable links tracking
     pub link_locations: Vec<(Rect, String)>,
+    // Search state
+    pub search_open: bool,
+    pub search_query: String,
+    pub search_results: Vec<OutlineNode>,
+    pub search_selection: usize,
+    pub current_note_nodes: Vec<OutlineNode>,
+    pub current_note_attachments: HashMap<String, Vec<Attachment>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -163,6 +173,11 @@ impl App {
     pub fn new(db_path: &str) -> Result<Self> {
         let db = Database::new(db_path);
         let conn = db.get_or_create()?;
+        let config_path = PathBuf::from(db_path)
+            .parent()
+            .map(|p| p.join("config.toml"))
+            .unwrap_or_else(|| PathBuf::from("."));
+        let config = load_config(&config_path);
         let today = chrono::Utc::now().date_naive();
         let month_start = NaiveDate::from_ymd_opt(today.year(), today.month(), 1)
             .unwrap_or(today);
@@ -179,6 +194,7 @@ impl App {
             cursor_position: 0,
             scroll_offset: 0,
             db_connection: conn,
+            config,
             is_editing: false,
             edit_buffer: String::new(),
             edit_cursor_position: 0,
@@ -190,6 +206,7 @@ impl App {
             search_open: false,
             search_query: String::new(),
             search_results: Vec::new(),
+            search_selection: 0,
             tag_filter: None,
             calendar_month_start: month_start,
             calendar_selected: today,
@@ -221,6 +238,8 @@ impl App {
             help_open: false,
             // Clickable links
             link_locations: Vec::new(),
+            current_note_nodes: Vec::new(),
+            current_note_attachments: HashMap::new(),
         })
     }
 
@@ -304,7 +323,15 @@ impl App {
         self.scroll_offset = 0;
         self.refresh_attachments()?;
         
-        Ok(())
+        // Also load attachments for this note
+        let attachments = AttachmentRepository::get_by_note_id(&self.db_connection, note_id)?;
+        let mut map = HashMap::new();
+        for att in attachments {
+            map.entry(att.node_id.clone()).or_default().push(att);
+        }
+        self.current_note_attachments = map;
+
+        self.refresh_backlinks()
     }
 
     /// Load the first available note
@@ -591,15 +618,42 @@ impl App {
             }
             let title = cap.get(1).map(|m| m.as_str().trim()).unwrap_or("");
             if title.is_empty() { continue; }
-            if let Ok(target) = NoteRepository::get_by_title_exact(&self.db_connection, title) {
-                let source_note_id = match &self.current_note { Some(n) => n.id.clone(), None => continue };
-                let link = notiq_core::models::Link::new_wiki_link(
-                    source_note_id,
-                    Some(node.id.clone()),
-                    target.id,
-                    Some(title.to_string()),
-                );
-                let _ = LinkRepository::create(&self.db_connection, &link)?;
+
+            let target_note = NoteRepository::get_by_title_exact(&self.db_connection, title);
+            let source_note_id = match &self.current_note { Some(n) => n.id.clone(), None => continue };
+
+            match target_note {
+                Ok(target) => {
+                    let link = notiq_core::models::Link::new_wiki_link(
+                        source_note_id,
+                        Some(node.id.clone()),
+                        target.id,
+                        Some(title.to_string()),
+                    );
+                    let _ = LinkRepository::create(&self.db_connection, &link)?;
+                },
+                Err(notiq_core::Error::NotFound(_)) => {
+                    // Auto-create page
+                    let new_note = notiq_core::models::Note::new(title.to_string());
+                    NoteRepository::create(&self.db_connection, &new_note)?;
+
+                    // Forward link
+                    let link = notiq_core::models::Link::new_wiki_link(
+                        source_note_id,
+                        Some(node.id.clone()),
+                        new_note.id.clone(),
+                        Some(title.to_string()),
+                    );
+                    let _ = LinkRepository::create(&self.db_connection, &link)?;
+
+                    // Backlink
+                    if let Some(source_note) = &self.current_note {
+                        let backlink_content = format!("[[{}]]", source_note.title);
+                        let backlink_node = notiq_core::models::OutlineNode::new(new_note.id.clone(), None, backlink_content);
+                        NodeRepository::create(&self.db_connection, &backlink_node)?;
+                    }
+                },
+                Err(_) => { /* Other DB errors, do nothing */ }
             }
         }
 
@@ -658,6 +712,9 @@ impl App {
             let new_id = new_node.id.clone();
             NodeRepository::create(&self.db_connection, &new_node)?;
             self.refresh_current_note_preserve_selection(Some(&new_id))?;
+
+            // Start editing the new node immediately
+            self.start_editing();
         }
         Ok(())
     }
@@ -863,12 +920,54 @@ impl App {
         self.search_open = true;
         self.search_query.clear();
         self.search_results.clear();
+        self.search_selection = 0;
     }
 
     pub fn close_search(&mut self) {
         self.search_open = false;
         self.search_query.clear();
         self.search_results.clear();
+        self.search_selection = 0;
+    }
+
+    pub fn perform_search(&mut self) -> Result<()> {
+        if self.search_query.is_empty() {
+            self.search_results.clear();
+        } else {
+            self.search_results = NodeRepository::search(&self.db_connection, &self.search_query)?;
+        }
+        self.search_selection = 0;
+        self.search_open = false; // Close search bar, show results
+        Ok(())
+    }
+
+    pub fn search_results_up(&mut self) {
+        if !self.search_results.is_empty() {
+            self.search_selection = self.search_selection.saturating_sub(1);
+        }
+    }
+
+    pub fn search_results_down(&mut self) {
+        if !self.search_results.is_empty() {
+            let max = self.search_results.len() - 1;
+            if self.search_selection < max {
+                self.search_selection += 1;
+            }
+        }
+    }
+
+    pub fn search_results_select(&mut self) -> Result<()> {
+        if let Some(node) = self.search_results.get(self.search_selection) {
+            self.load_note(&node.note_id)?;
+            // Find the node in the visible nodes and set cursor
+            let visible = self.get_visible_nodes();
+            if let Some(idx) = visible.iter().position(|t| t.node.id == node.id) {
+                self.cursor_position = idx;
+            }
+        }
+        self.search_results.clear();
+        self.search_selection = 0;
+        Ok(())
     }
 
     pub fn update_search_query(&mut self, ch: char) {
@@ -902,6 +1001,14 @@ impl App {
     pub fn set_tag_filter(&mut self, tag_name: String) -> Result<()> {
         self.tag_filter = Some(tag_name);
         self.refresh_notes_list()
+    }
+
+    pub fn select_favorite_by_index(&mut self, index: usize) -> Result<()> {
+        if index < self.favorites.len() {
+            let id = self.favorites[index].note_id.clone();
+            self.load_note(&id)?;
+        }
+        Ok(())
     }
 
     /// Select a page by index from `notes`
@@ -1197,7 +1304,10 @@ impl App {
         // Determine destination path (hash + original extension)
         let ext = src_path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let filename_hashed = if ext.is_empty() { hash_hex.clone() } else { format!("{}.{}", hash_hex, ext) };
-        let attachments_dir = self.attachments_dir();
+        
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        let attachments_dir = self.attachments_dir().join(today);
+
         std::fs::create_dir_all(&attachments_dir)?;
         let dest_path = attachments_dir.join(&filename_hashed);
 
@@ -1212,9 +1322,24 @@ impl App {
 
         // Create DB record
         let note_id = match &self.current_note { Some(n) => n.id.clone(), None => return Ok(()) };
+        let node_id = match self.get_selected_node() {
+            Some(n) => n.node.id.clone(),
+            None => {
+                // If there's no selected node, maybe there are no nodes. Create one.
+                if self.get_visible_nodes().is_empty() {
+                    let new_node = notiq_core::models::OutlineNode::new(note_id.clone(), None, "".to_string(), 0);
+                    NodeRepository::create(&self.db_connection, &new_node)?;
+                    self.refresh_current_note()?;
+                    new_node.id.clone()
+                } else {
+                    return Ok(()); // Or handle this case appropriately
+                }
+            }
+        };
+
         let attachment = Attachment::new(
             note_id,
-            None,
+            node_id,
             src_path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string(),
             dest_path.to_string_lossy().to_string(),
             mime,
@@ -1492,15 +1617,7 @@ impl App {
     
     pub fn calendar_click_day(&mut self, row: usize, col: usize) -> Result<()> {
         let month_start = self.calendar_month_start;
-        let first_weekday = match month_start.weekday() {
-            chrono::Weekday::Mon => 0,
-            chrono::Weekday::Tue => 1,
-            chrono::Weekday::Wed => 2,
-            chrono::Weekday::Thu => 3,
-            chrono::Weekday::Fri => 4,
-            chrono::Weekday::Sat => 5,
-            chrono::Weekday::Sun => 6,
-        };
+        let first_weekday = month_start.weekday().num_days_from_monday() as usize;
         
         let cell_index = row * 7 + col;
         if cell_index < first_weekday {

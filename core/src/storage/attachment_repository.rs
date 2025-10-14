@@ -129,8 +129,8 @@ impl AttachmentRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::Note;
-    use crate::storage::{Database, NoteRepository};
+    use crate::models::{Note, OutlineNode};
+    use crate::storage::{Database, NodeRepository, NoteRepository};
     use tempfile::tempdir;
 
     fn setup_test_db() -> (tempfile::TempDir, Connection) {
@@ -147,10 +147,12 @@ mod tests {
         
         let note = Note::new("Test Note".to_string());
         NoteRepository::create(&conn, &note).unwrap();
+        let node = OutlineNode::new(note.id.clone(), None, "".to_string(), 0);
+        NodeRepository::create(&conn, &node).unwrap();
         
         let attachment = Attachment::new(
             note.id.clone(),
-            None,
+            node.id.clone(),
             "document.pdf".to_string(),
             "/path/to/document.pdf".to_string(),
             Some("application/pdf".to_string()),
@@ -170,10 +172,12 @@ mod tests {
         
         let note = Note::new("Test Note".to_string());
         NoteRepository::create(&conn, &note).unwrap();
+        let node = OutlineNode::new(note.id.clone(), None, "".to_string(), 0);
+        NodeRepository::create(&conn, &node).unwrap();
         
         let attachment1 = Attachment::new(
             note.id.clone(),
-            None,
+            node.id.clone(),
             "file1.txt".to_string(),
             "/path/file1.txt".to_string(),
             None,
@@ -183,7 +187,7 @@ mod tests {
         
         let attachment2 = Attachment::new(
             note.id.clone(),
-            None,
+            node.id.clone(),
             "file2.txt".to_string(),
             "/path/file2.txt".to_string(),
             None,
@@ -204,10 +208,12 @@ mod tests {
         
         let note = Note::new("Test Note".to_string());
         NoteRepository::create(&conn, &note).unwrap();
+        let node = OutlineNode::new(note.id.clone(), None, "".to_string(), 0);
+        NodeRepository::create(&conn, &node).unwrap();
         
         let attachment = Attachment::new(
             note.id.clone(),
-            None,
+            node.id.clone(),
             "file.txt".to_string(),
             "/path/file.txt".to_string(),
             None,
@@ -231,10 +237,12 @@ mod tests {
         
         let note = Note::new("Test Note".to_string());
         NoteRepository::create(&conn, &note).unwrap();
+        let node = OutlineNode::new(note.id.clone(), None, "".to_string(), 0);
+        NodeRepository::create(&conn, &node).unwrap();
         
         let attachment1 = Attachment::new(
             note.id.clone(),
-            None,
+            node.id.clone(),
             "file1.txt".to_string(),
             "/path/file1.txt".to_string(),
             None,
@@ -244,7 +252,7 @@ mod tests {
         
         let attachment2 = Attachment::new(
             note.id.clone(),
-            None,
+            node.id.clone(),
             "file2.txt".to_string(),
             "/path/file2.txt".to_string(),
             None,

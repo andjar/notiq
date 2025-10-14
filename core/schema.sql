@@ -108,7 +108,7 @@ CREATE INDEX IF NOT EXISTS idx_links_type ON links(link_type);
 CREATE TABLE IF NOT EXISTS attachments (
     id TEXT PRIMARY KEY,
     note_id TEXT NOT NULL,
-    node_id TEXT,
+    node_id TEXT NOT NULL,
     filename TEXT NOT NULL,
     filepath TEXT NOT NULL,
     mime_type TEXT,

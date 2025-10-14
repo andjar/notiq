@@ -6,19 +6,22 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+crossterm = "0.27"
+ratatui = { version = "0.26.1", features = ["all-widgets"] }
 notiq-core = { path = "../core" }
-ratatui = { workspace = true }
-crossterm = { workspace = true }
-anyhow = { workspace = true }
-regex = "1.10"
-chrono = { version = "0.4", features = ["clock", "std"] }
+regex = "1.10.4"
 opener = "0.6"
 sha2 = "0.10"
 hex = "0.4"
 mime_guess = "2.0"
-toml = "0.8"
+toml = "0.8.12"
 arboard = { version = "3.3", optional = true }
 unicode-width = "0.1"
+unicode-segmentation = "1.11.0"
+clipboard = "0.5.0"
+image = "0.25.1"
+serde = { version = "1.0", features = ["derive"] }
 
 [features]
 default = ["clipboard"]

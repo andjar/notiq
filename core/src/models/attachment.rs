@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 pub struct Attachment {
     pub id: String,
     pub note_id: String,
-    pub node_id: Option<String>,
+    pub node_id: String,
     pub filename: String,
     pub filepath: String,
     pub mime_type: Option<String>,
@@ -18,7 +18,7 @@ impl Attachment {
     /// Create a new attachment
     pub fn new(
         note_id: String,
-        node_id: Option<String>,
+        node_id: String,
         filename: String,
         filepath: String,
         mime_type: Option<String>,
@@ -61,7 +61,7 @@ mod tests {
     fn test_attachment_creation() {
         let attachment = Attachment::new(
             "note-1".to_string(),
-            None,
+            "node-1".to_string(),
             "document.pdf".to_string(),
             "/path/to/document.pdf".to_string(),
             Some("application/pdf".to_string()),
@@ -76,7 +76,7 @@ mod tests {
     fn test_human_readable_size() {
         let attachment = Attachment::new(
             "note-1".to_string(),
-            None,
+            "node-1".to_string(),
             "file.txt".to_string(),
             "/path/file.txt".to_string(),
             None,
@@ -87,7 +87,7 @@ mod tests {
         
         let large = Attachment::new(
             "note-1".to_string(),
-            None,
+            "node-1".to_string(),
             "large.zip".to_string(),
             "/path/large.zip".to_string(),
             None,

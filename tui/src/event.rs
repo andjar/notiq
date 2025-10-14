@@ -2,6 +2,44 @@ use anyhow::Result;
 use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind, Event as CEvent, KeyEventKind};
 use std::time::Duration;
 use notiq_core::storage::NoteRepository;
+use crate::app::App;
+
+fn parse_keybinding(kb: &str) -> (KeyCode, KeyModifiers) {
+    let mut modifiers = KeyModifiers::empty();
+    let mut key_code_str = kb;
+
+    if let Some(parts) = kb.rsplit_once('-') {
+        let mod_str = parts.0;
+        key_code_str = parts.1;
+
+        for m in mod_str.split('-') {
+            match m.to_lowercase().as_str() {
+                "ctrl" => modifiers.insert(KeyModifiers::CONTROL),
+                "alt" => modifiers.insert(KeyModifiers::ALT),
+                "shift" => modifiers.insert(KeyModifiers::SHIFT),
+                _ => {}
+            }
+        }
+    }
+
+    let key_code = match key_code_str {
+        "enter" => KeyCode::Enter,
+        "esc" => KeyCode::Esc,
+        "backspace" => KeyCode::Backspace,
+        "left" => KeyCode::Left,
+        "right" => KeyCode::Right,
+        "up" => KeyCode::Up,
+        "down" => KeyCode::Down,
+        "pageup" => KeyCode::PageUp,
+        "pagedown" => KeyCode::PageDown,
+        "space" => KeyCode::Char(' '),
+        s if s.len() == 1 => KeyCode::Char(s.chars().next().unwrap()),
+        _ => KeyCode::Null,
+    };
+
+    (key_code, modifiers)
+}
+
 
 /// Terminal events
 #[derive(Debug, Clone, Copy)]
@@ -49,6 +87,12 @@ pub fn handle_key_event(key: KeyEvent, app: &mut crate::app::App) {
         return;
     }
 
+    // Search results take precedence
+    if !app.search_results.is_empty() {
+        handle_search_results_input(key, app);
+        return;
+    }
+
     // Attach overlay takes precedence
     if app.attach_overlay_open {
         match key.code {
@@ -74,11 +118,12 @@ pub fn handle_key_event(key: KeyEvent, app: &mut crate::app::App) {
         match key.code {
             KeyCode::Esc => app.close_search(),
             KeyCode::Enter => {
-                // If query starts with #, treat as tag filter
                 if app.search_query.starts_with('#') {
                     let name = app.search_query.trim_start_matches('#').trim().to_string();
                     if !name.is_empty() { let _ = app.set_tag_filter(name); }
                     app.close_search();
+                } else {
+                    let _ = app.perform_search();
                 }
             }
             KeyCode::Backspace => { app.backspace_search_query(); },
@@ -158,9 +203,45 @@ pub fn handle_key_event(key: KeyEvent, app: &mut crate::app::App) {
         return;
     }
 
+    let keymap = &app.config.keymap;
+
+    let (quit_kc, quit_km) = parse_keybinding(&keymap.quit);
+    let (toggle_sidebar_kc, toggle_sidebar_km) = parse_keybinding(&keymap.toggle_sidebar);
+    let (open_page_switcher_kc, open_page_switcher_km) = parse_keybinding(&keymap.open_page_switcher);
+    let (create_new_page_kc, create_new_page_km) = parse_keybinding(&keymap.create_new_page);
+    let (delete_current_page_kc, delete_current_page_km) = parse_keybinding(&keymap.delete_current_page);
+    let (toggle_favorite_kc, toggle_favorite_km) = parse_keybinding(&keymap.toggle_favorite);
+    let (open_logbook_kc, open_logbook_km) = parse_keybinding(&keymap.open_logbook);
+    let (export_kc, export_km) = parse_keybinding(&keymap.export);
+    let (attach_kc, attach_km) = parse_keybinding(&keymap.attach);
+    let (open_attachment_kc, open_attachment_km) = parse_keybinding(&keymap.open_attachment);
+    let (attachments_select_up_kc, attachments_select_up_km) = parse_keybinding(&keymap.attachments_select_up);
+    let (attachments_select_down_kc, attachments_select_down_km) = parse_keybinding(&keymap.attachments_select_down);
+    let (sidebar_select_up_kc, sidebar_select_up_km) = parse_keybinding(&keymap.sidebar_select_up);
+    let (sidebar_select_down_kc, sidebar_select_down_km) = parse_keybinding(&keymap.sidebar_select_down);
+    let (sidebar_activate_kc, sidebar_activate_km) = parse_keybinding(&keymap.sidebar_activate);
+    let (move_up_kc, move_up_km) = parse_keybinding(&keymap.move_up);
+    let (move_down_kc, move_down_km) = parse_keybinding(&keymap.move_down);
+    let (cursor_up_kc, cursor_up_km) = parse_keybinding(&keymap.cursor_up);
+    let (cursor_down_kc, cursor_down_km) = parse_keybinding(&keymap.cursor_down);
+    let (expand_kc, expand_km) = parse_keybinding(&keymap.expand);
+    let (collapse_kc, collapse_km) = parse_keybinding(&keymap.collapse);
+    let (start_editing_kc, start_editing_km) = parse_keybinding(&keymap.start_editing);
+    let (create_sibling_kc, create_sibling_km) = parse_keybinding(&keymap.create_sibling);
+    let (initiate_delete_kc, initiate_delete_km) = parse_keybinding(&keymap.initiate_delete);
+    let (task_overview_kc, task_overview_km) = parse_keybinding(&keymap.task_overview);
+    let (clear_tag_filter_kc, clear_tag_filter_km) = parse_keybinding(&keymap.clear_tag_filter);
+    let (paste_kc, paste_km) = parse_keybinding(&keymap.paste);
+    let (rename_page_kc, rename_page_km) = parse_keybinding(&keymap.rename_page);
+    let (help_kc, help_km) = parse_keybinding(&keymap.help);
+    let (create_quote_block_kc, create_quote_block_km) = parse_keybinding(&keymap.create_quote_block);
+    let (create_code_block_kc, create_code_block_km) = parse_keybinding(&keymap.create_code_block);
+    let (toggle_task_kc, toggle_task_km) = parse_keybinding(&keymap.toggle_task);
+    let (search_kc, search_km) = parse_keybinding(&keymap.search);
+
     // --- Global key handlers (not in a specific mode) ---
     match key.code {
-        // Calendar interactions (Shift-modified first to avoid unreachable patterns)
+        // Calendar interactions are not configurable for now
         KeyCode::Left if key.modifiers.contains(KeyModifiers::SHIFT) => app.calendar_move_day(-1),
         KeyCode::Right if key.modifiers.contains(KeyModifiers::SHIFT) => app.calendar_move_day(1),
         KeyCode::Up if key.modifiers.contains(KeyModifiers::SHIFT) => app.calendar_move_week(-1),
@@ -170,33 +251,26 @@ pub fn handle_key_event(key: KeyEvent, app: &mut crate::app::App) {
         KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
             let _ = app.open_selected_daily_note();
         }
-        // Task toggle
-        KeyCode::Char('x') | KeyCode::Char(' ') => {
+
+        kc if kc == toggle_task_kc && key.modifiers == toggle_task_km => {
             let _ = app.toggle_selected_task();
         }
-        // Search toggle
-        KeyCode::Char('/') => app.open_search(),
-        KeyCode::Char('q') | KeyCode::Char('Q') if !key.modifiers.contains(KeyModifiers::CONTROL) => app.quit(),
-        // Toggle sidebar
-        KeyCode::Char('b') | KeyCode::Char('B') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.toggle_sidebar();
-        }
-        // Page management shortcuts (Phase 4)
-        KeyCode::Char('p') | KeyCode::Char('P') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+        kc if kc == search_kc && key.modifiers == search_km => app.open_search(),
+        kc if kc == quit_kc && key.modifiers == quit_km => app.quit(),
+        kc if kc == toggle_sidebar_kc && key.modifiers == toggle_sidebar_km => app.toggle_sidebar(),
+        kc if kc == open_page_switcher_kc && key.modifiers == open_page_switcher_km => {
             let _ = app.open_page_switcher();
         }
-        KeyCode::Char('n') | KeyCode::Char('N') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+        kc if kc == create_new_page_kc && key.modifiers == create_new_page_km => {
             let _ = app.create_new_page();
         }
-        KeyCode::Char('d') | KeyCode::Char('D') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+        kc if kc == delete_current_page_kc && key.modifiers == delete_current_page_km => {
             let _ = app.delete_current_page();
         }
-        // Favorites toggle
-        KeyCode::Char('f') | KeyCode::Char('F') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+        kc if kc == toggle_favorite_kc && key.modifiers == toggle_favorite_km => {
             let _ = app.toggle_favorite_current();
         }
-        // Logbook for selected task
-        KeyCode::Char('l') | KeyCode::Char('L') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+        kc if kc == open_logbook_kc && key.modifiers == open_logbook_km => {
             let _ = app.open_logbook_for_selected();
         }
         KeyCode::Esc => {
@@ -204,78 +278,75 @@ pub fn handle_key_event(key: KeyEvent, app: &mut crate::app::App) {
                 app.close_logbook();
             }
         }
-        // Export
-        KeyCode::Char('e') | KeyCode::Char('E') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+        kc if kc == export_kc && key.modifiers == export_km => {
             let out = std::path::PathBuf::from("export");
             let _ = app.export_markdown(&out);
         }
-        // Attachments (Phase 7)
-        KeyCode::Char('a') | KeyCode::Char('A') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+        kc if kc == attach_kc && key.modifiers == attach_km => {
             app.open_attachments_overlay();
         }
-        KeyCode::Char('o') | KeyCode::Char('O') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+        kc if kc == open_attachment_kc && key.modifiers == open_attachment_km => {
             let _ = app.open_selected_attachment();
         }
-        KeyCode::Char('[') => app.attachments_select_up(), // navigate attachments up
-        KeyCode::Char(']') => app.attachments_select_down(), // navigate attachments down
-        // Sidebar navigation (use PageUp/PageDown to move selection; Enter to open)
-        KeyCode::PageUp => app.sidebar_select_up(),
-        KeyCode::PageDown => app.sidebar_select_down(),
-        KeyCode::Enter if key.modifiers.contains(KeyModifiers::ALT) => {
+        kc if kc == attachments_select_up_kc && key.modifiers == attachments_select_up_km => app.attachments_select_up(),
+        kc if kc == attachments_select_down_kc && key.modifiers == attachments_select_down_km => app.attachments_select_down(),
+        kc if kc == sidebar_select_up_kc && key.modifiers == sidebar_select_up_km => app.sidebar_select_up(),
+        kc if kc == sidebar_select_down_kc && key.modifiers == sidebar_select_down_km => app.sidebar_select_down(),
+        kc if kc == sidebar_activate_kc && key.modifiers == sidebar_activate_km => {
             let _ = app.sidebar_activate_selected();
         }
-        // Move/reorder with Alt, plain navigation otherwise (order of patterns matters)
-        KeyCode::Up if key.modifiers.contains(KeyModifiers::ALT) => {
+        kc if kc == move_up_kc && key.modifiers == move_up_km => {
             let _ = app.move_selected_up();
         }
-        KeyCode::Down if key.modifiers.contains(KeyModifiers::ALT) => {
+        kc if kc == move_down_kc && key.modifiers == move_down_km => {
             let _ = app.move_selected_down();
         }
-        KeyCode::Up => app.move_cursor_up(),
-        KeyCode::Down => app.move_cursor_down(),
-        // Expand/Collapse
-        KeyCode::Left => app.toggle_selected_expand_collapse(Some(false)),
-        KeyCode::Right => app.toggle_selected_expand_collapse(Some(true)),
-        // Edit mode controls (generic Enter after Shift+Enter)
-        KeyCode::Enter => app.start_editing(),
-        KeyCode::Char(ch) => {
-            if ch == 'n' {
-                let _ = app.create_sibling_below();
-            } else if ch == 'd' {
-                app.initiate_delete();
-            } else if ch == 't' && key.modifiers.contains(KeyModifiers::CONTROL) {
-                // Ctrl+T for task overview OR clear tag filter
-                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                    app.open_task_overview();
-                } else {
-                    let _ = app.clear_tag_filter();
-                }
-            } else if ch == 'v' && key.modifiers.contains(KeyModifiers::CONTROL) {
-                // Ctrl+V paste image from clipboard
-                let _ = app.paste_from_clipboard();
-            } else if ch == 'r' && key.modifiers.contains(KeyModifiers::CONTROL) {
-                app.start_renaming_page();
-            } else if ch == 'h' && !key.modifiers.contains(KeyModifiers::CONTROL) {
-                app.open_help();
-            } else if ch == 'q' && key.modifiers.contains(KeyModifiers::CONTROL) {
-                // Ctrl+Q for quote block
-                let _ = app.create_quote_block();
-            } else if ch == 'c' && key.modifiers.contains(KeyModifiers::CONTROL) {
-                // Ctrl+C for code block
-                let _ = app.create_code_block();
-            }
-        }
-        // CRUD via non-char
-        KeyCode::Insert => {
+        kc if kc == cursor_up_kc && key.modifiers == cursor_up_km => app.move_cursor_up(),
+        kc if kc == cursor_down_kc && key.modifiers == cursor_down_km => app.move_cursor_down(),
+        kc if kc == collapse_kc && key.modifiers == collapse_km => app.toggle_selected_expand_collapse(Some(false)),
+        kc if kc == expand_kc && key.modifiers == expand_km => app.toggle_selected_expand_collapse(Some(true)),
+        kc if kc == start_editing_kc && key.modifiers == start_editing_km => app.start_editing(),
+        kc if kc == create_sibling_kc && key.modifiers == create_sibling_km => {
             let _ = app.create_sibling_below();
         }
-        KeyCode::Delete => app.initiate_delete(),
-        // Indent / Outdent
-        KeyCode::Tab => {
-            let _ = app.indent_selected();
+        kc if kc == initiate_delete_kc && key.modifiers == initiate_delete_km => {
+            app.initiate_delete();
         }
-        KeyCode::BackTab => {
-            let _ = app.outdent_selected();
+        kc if kc == task_overview_kc && key.modifiers == task_overview_km => {
+            app.open_task_overview();
+        }
+        kc if kc == clear_tag_filter_kc && key.modifiers == clear_tag_filter_km => {
+            let _ = app.clear_tag_filter();
+        }
+        kc if kc == paste_kc && key.modifiers == paste_km => {
+            let _ = app.paste_from_clipboard();
+        }
+        kc if kc == rename_page_kc && key.modifiers == rename_page_km => {
+            app.start_renaming_page();
+        }
+        kc if kc == help_kc && key.modifiers == help_km => {
+            app.open_help();
+        }
+        kc if kc == create_quote_block_kc && key.modifiers == create_quote_block_km => {
+            let _ = app.create_quote_block();
+        }
+        kc if kc == create_code_block_kc && key.modifiers == create_code_block_km => {
+            let _ = app.create_code_block();
+        }
+        _ => {}
+    }
+}
+
+fn handle_search_results_input(key: KeyEvent, app: &mut App) {
+    match key.code {
+        KeyCode::Esc => {
+            app.search_results.clear();
+            app.search_selection = 0;
+        }
+        KeyCode::Up => app.search_results_up(),
+        KeyCode::Down => app.search_results_down(),
+        KeyCode::Enter => {
+            let _ = app.search_results_select();
         }
         _ => {}
     }
@@ -406,24 +477,37 @@ pub fn handle_mouse_event(mouse: MouseEvent, app: &mut crate::app::App, _size: r
                 
                 // Sidebar click
                 if app.show_sidebar && x < content_left_sidebar_w {
-                    // Calendar area: rows 3-12 (9 rows total including border)
-                    if y >= content_top && y < content_top + 9 {
+                    let calendar_h = 9u16;
+                    let tags_h = 10u16;
+                    let favorites_h = 6u16;
+
+                    // Calendar area
+                    if y >= content_top && y < content_top + calendar_h {
                         let calendar_y = y - content_top;
-                        // Skip title (row 0, 1) and weekday header (row 2)
                         if calendar_y >= 3 && calendar_y <= 8 {
                             let day_row = (calendar_y - 3) as usize;
-                            // Each day cell is 3 chars wide (2 digits + space)
                             let day_col = ((x as i32 - 1) / 3) as usize;
                             if day_col < 7 {
                                 let _ = app.calendar_click_day(day_row, day_col);
                             }
                         }
+                    } 
+                    // Tags area (no action for now)
+                    else if y < content_top + calendar_h + tags_h {
+                        //
                     }
-                    // Pages list area: after calendar(9) + tags(10) + favorites(6) + border(1)
+                    // Favorites area
+                    else if y < content_top + calendar_h + tags_h + favorites_h {
+                        let row_in_list = (y - (content_top + calendar_h + tags_h)) as usize;
+                        if row_in_list < app.favorites.len() {
+                            let _ = app.select_favorite_by_index(row_in_list);
+                        }
+                    }
+                    // Pages list area
                     else {
-                        let row_in_list = (y - content_top).saturating_sub(9 + 10 + 6 + 1);
-                        if row_in_list < app.notes.len() as u16 {
-                            let idx = row_in_list as usize;
+                        let row_in_list = (y - (content_top + calendar_h + tags_h + favorites_h)) as usize;
+                        if row_in_list < app.notes.len() {
+                            let idx = row_in_list;
                             let _ = app.select_page_by_index(idx);
                         }
                     }

@@ -1,6 +1,7 @@
 pub mod app;
-pub mod ui;
 pub mod event;
+pub mod ui;
+pub mod config;
 
-pub use app::App;
-pub use event::{Event, EventHandler};
+use crate::app::App;
+use crate::event::{Event, EventHandler};
