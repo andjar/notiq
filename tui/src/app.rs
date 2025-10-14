@@ -1,5 +1,5 @@
-use anyhow::Result;
 use notiq_core::{
+    Result,
     models::{Attachment, Note, OutlineNode, TaskStatus, TaskStatusLog},
     storage::{
         AttachmentRepository, Connection, DailyNoteRepository, Database, FavoriteRepository, LinkRepository,
@@ -106,9 +106,6 @@ pub struct App {
     pub page_filter: String,
     pub page_switcher_selection_index: usize,
     // Phase 5 - Search & Tags & Backlinks
-    pub search_open: bool,
-    pub search_query: String,
-    pub search_results: Vec<OutlineNode>,
     pub tag_filter: Option<String>,
     // Phase 6 - Calendar & Daily Notes
     pub calendar_month_start: NaiveDate,
@@ -325,13 +322,13 @@ impl App {
         
         // Also load attachments for this note
         let attachments = AttachmentRepository::get_by_note_id(&self.db_connection, note_id)?;
-        let mut map = HashMap::new();
+        let mut map: HashMap<String, Vec<Attachment>> = HashMap::new();
         for att in attachments {
             map.entry(att.node_id.clone()).or_default().push(att);
         }
         self.current_note_attachments = map;
 
-        self.refresh_backlinks()
+        Ok(())
     }
 
     /// Load the first available note
@@ -649,7 +646,7 @@ impl App {
                     // Backlink
                     if let Some(source_note) = &self.current_note {
                         let backlink_content = format!("[[{}]]", source_note.title);
-                        let backlink_node = notiq_core::models::OutlineNode::new(new_note.id.clone(), None, backlink_content);
+                        let backlink_node = notiq_core::models::OutlineNode::new(new_note.id.clone(), None, backlink_content, 0);
                         NodeRepository::create(&self.db_connection, &backlink_node)?;
                     }
                 },
@@ -957,11 +954,13 @@ impl App {
     }
 
     pub fn search_results_select(&mut self) -> Result<()> {
-        if let Some(node) = self.search_results.get(self.search_selection) {
-            self.load_note(&node.note_id)?;
+        if let Some(node) = self.search_results.get(self.search_selection).cloned() {
+            let node_id = node.id.clone();
+            let note_id = node.note_id.clone();
+            self.load_note(&note_id)?;
             // Find the node in the visible nodes and set cursor
             let visible = self.get_visible_nodes();
-            if let Some(idx) = visible.iter().position(|t| t.node.id == node.id) {
+            if let Some(idx) = visible.iter().position(|t| t.node.id == node_id) {
                 self.cursor_position = idx;
             }
         }
@@ -988,6 +987,13 @@ impl App {
         if let Ok(results) = NodeRepository::search(&self.db_connection, &self.search_query) {
             self.search_results = results;
         }
+    }
+
+    /// Get note title by note ID
+    pub fn get_note_title_from_id(&self, note_id: &str) -> Option<String> {
+        self.notes.iter()
+            .find(|n| n.id == note_id)
+            .map(|n| n.title.clone())
     }
 
     // =========================
@@ -1322,14 +1328,14 @@ impl App {
 
         // Create DB record
         let note_id = match &self.current_note { Some(n) => n.id.clone(), None => return Ok(()) };
-        let node_id = match self.get_selected_node() {
-            Some(n) => n.node.id.clone(),
+        let node_id = match self.get_selected_node_id() {
+            Some(id) => id,
             None => {
                 // If there's no selected node, maybe there are no nodes. Create one.
                 if self.get_visible_nodes().is_empty() {
                     let new_node = notiq_core::models::OutlineNode::new(note_id.clone(), None, "".to_string(), 0);
                     NodeRepository::create(&self.db_connection, &new_node)?;
-                    self.refresh_current_note()?;
+                    self.refresh_current_note_preserve_selection(None)?;
                     new_node.id.clone()
                 } else {
                     return Ok(()); // Or handle this case appropriately
@@ -1649,7 +1655,8 @@ impl App {
         #[cfg(feature = "clipboard")]
         {
             use arboard::Clipboard;
-            let mut clipboard = Clipboard::new()?;
+            let mut clipboard = Clipboard::new()
+                .map_err(|e| notiq_core::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
             
             // Check if clipboard has an image
             if let Ok(img) = clipboard.get_image() {
