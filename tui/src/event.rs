@@ -1,4 +1,4 @@
-use anyhow::Result;
+use notiq_core::Result;
 use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind, Event as CEvent, KeyEventKind};
 use std::time::Duration;
 use notiq_core::storage::NoteRepository;

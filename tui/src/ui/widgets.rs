@@ -7,7 +7,7 @@ use ratatui::{
     Frame,
 };
 use notiq_core::storage::{TagRepository, LinkRepository, NoteRepository, NodeRepository};
-use chrono::{Datelike, NaiveDate, Weekday};
+use chrono::{Datelike, NaiveDate};
 use regex::Regex;
 use unicode_width::UnicodeWidthStr;
 
